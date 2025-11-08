@@ -1,0 +1,47 @@
+{
+  "page": {
+    "width_mm": 210.0,
+    "height_mm": 297.0
+  },
+  "layout": {
+    "cell_size_mm": 40.0,
+    "line_spacing_ratio": 0.2,
+    "char_spacing_ratio": 0.1,
+    "direction": "horizontal",
+    "font_units_per_em": 1000.0
+  },
+  "plotter": {
+    "pen_up_z": 0.0,
+    "pen_down_z": 8.0,
+    "safe_z": 1.0
+  },
+  "positions": {
+    "ink": {
+      "x": 10.0,
+      "y": -10.0
+    },
+    "paper": {
+      "x": 0.0,
+      "y": 0.0
+    }
+  },
+  "macros": {
+    "ink_macro": [
+      "G0 Z0",
+      "G0 X10 Y-10",
+      "G1 Z8",
+      "G4 P0.5",
+      "G0 Z0"
+    ],
+    "paper_macro": [
+      "G0 Z0",
+      "G0 X0 Y0",
+      "G4 P1.0"
+    ]
+  },
+  "gcode": {
+    "insert_every_n_moves": 80,
+    "insert_every_n_ink": 5,
+    "default_feedrate": 1000
+  }
+}

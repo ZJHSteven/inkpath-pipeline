@@ -1,7 +1,11 @@
 [project]
 name = "inkpath-pipeline"
 version = "0.1.0"
-description = "Add your description here"
+description = "GRBL 写字机 SVG 排版、G-code 后处理与 GUI 工具"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = []
+
+[project.scripts]
+inkpath = "plotter_tool.cli:main"
+inkpath-gui = "plotter_tool.gui:launch"
