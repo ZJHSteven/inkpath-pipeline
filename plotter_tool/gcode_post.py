@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 import logging
 import re
 
@@ -235,3 +235,22 @@ def _format_macro_line(template: str, context: Dict[str, float]) -> str:
 
     safe_context = _SafeDict(context)
     return template.format_map(safe_context)
+
+
+def build_macro_context(
+    plotter_cfg: Dict[str, Any],
+    positions_cfg: Dict[str, Dict[str, Any]],
+) -> Dict[str, float]:
+    """将配置文件中的坐标/Z 值抽取出来，供宏模板格式化使用。"""
+
+    ink = positions_cfg.get("ink", {})
+    paper = positions_cfg.get("paper", {})
+    return {
+        "pen_up_z": float(plotter_cfg.get("pen_up_z", 0.0)),
+        "pen_down_z": float(plotter_cfg.get("pen_down_z", 0.0)),
+        "safe_z": float(plotter_cfg.get("safe_z", plotter_cfg.get("pen_up_z", 0.0))),
+        "ink_x": float(ink.get("x", 0.0)),
+        "ink_y": float(ink.get("y", 0.0)),
+        "paper_x": float(paper.get("x", 0.0)),
+        "paper_y": float(paper.get("y", 0.0)),
+    }

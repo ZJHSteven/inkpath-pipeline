@@ -10,11 +10,11 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Iterable, Optional
 
 from .config import ConfigError, load_config
 from .svg_font import LayoutParams, SUPPORTED_DIRECTIONS, export_text
-from .gcode_post import PostParams, post_process
+from .gcode_post import PostParams, build_macro_context, post_process
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,7 +112,7 @@ def _handle_post(args: argparse.Namespace) -> None:
         default_feedrate=args.feedrate or gcode_cfg["default_feedrate"],
         ink_macro=macro_cfg["ink_macro"],
         paper_macro=macro_cfg["paper_macro"],
-        macro_context=_build_macro_context(plotter_cfg, positions),
+        macro_context=build_macro_context(plotter_cfg, positions),
     )
 
     result = post_process(params)
@@ -149,19 +149,3 @@ def _print_missing_table(missing: Iterable[str]) -> None:
         safe_char = char if char.strip() else "(空白)"
         print(f"| {idx:>4} | {safe_char:<8} |")
     print("+------+----------+")
-
-
-def _build_macro_context(plotter_cfg: Dict[str, float], positions_cfg: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-    """将配置转换成 format_map 可以直接使用的字典。"""
-
-    ink = positions_cfg.get("ink", {})
-    paper = positions_cfg.get("paper", {})
-    return {
-        "pen_up_z": plotter_cfg.get("pen_up_z", 0.0),
-        "pen_down_z": plotter_cfg.get("pen_down_z", 0.0),
-        "safe_z": plotter_cfg.get("safe_z", plotter_cfg.get("pen_up_z", 0.0)),
-        "ink_x": ink.get("x", 0.0),
-        "ink_y": ink.get("y", 0.0),
-        "paper_x": paper.get("x", 0.0),
-        "paper_y": paper.get("y", 0.0),
-    }
