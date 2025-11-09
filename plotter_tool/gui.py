@@ -58,35 +58,53 @@ class PlotterApp(tk.Tk):
 
     # --- SVG 排版 -----------------------------------------------------
     def _open_layout_window(self) -> None:
+        """构造排版窗口：顶部放文本，中部可滚动参数区，底部固定操作按钮。"""
+
         window = tk.Toplevel(self)
         window.title("文字排版")
-        window.geometry("540x560")
+        window.geometry("600x640")  # 初始尺寸足够展示全部控件
+        window.minsize(520, 520)  # 允许拉伸，但限制极端缩放
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(1, weight=1)
 
         layout_cfg = self.config_data["layout"]
         page_cfg = self.config_data["page"]
 
-        tk.Label(window, text="输入文字 (支持多行)").pack(anchor=tk.W, padx=8, pady=(8, 0))
-        text_widget = tk.Text(window, height=6)
-        text_widget.pack(fill=tk.X, padx=8)
+        text_frame = ttk.LabelFrame(window, text="输入文字（可多行）")
+        text_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+        text_widget = tk.Text(text_frame, height=6, wrap=tk.WORD)
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         font_var = tk.StringVar()
         output_var = tk.StringVar()
         direction_var = tk.StringVar(value=layout_cfg["direction"])
-        self._add_path_field(window, "字体 SVG", font_var, filedialog.askopenfilename)
-        self._add_path_field(window, "输出 SVG", output_var, filedialog.asksaveasfilename)
 
-        form = ttk.Frame(window)
-        form.pack(fill=tk.X, padx=8, pady=8)
+        scrollable_form = _ScrollableFrame(window)
+        scrollable_form.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
+        form = scrollable_form.body  # body 承载真实控件
+
+        path_section = ttk.LabelFrame(form, text="路径配置")
+        path_section.pack(fill=tk.X, pady=(0, 8))
+        self._add_path_field(path_section, "字体 SVG", font_var, filedialog.askopenfilename)
+        self._add_path_field(path_section, "输出 SVG", output_var, filedialog.asksaveasfilename)
+
+        param_section = ttk.LabelFrame(form, text="排版参数（单位：mm）")
+        param_section.pack(fill=tk.X, pady=(0, 8))
         fields: Dict[str, tk.Entry] = {}
-        self._add_labeled_entry(form, "字格 (mm)", layout_cfg["cell_size_mm"], 12, fields, "cell")
-        self._add_labeled_entry(form, "字距系数", layout_cfg["char_spacing_ratio"], 12, fields, "char")
-        self._add_labeled_entry(form, "行距系数", layout_cfg["line_spacing_ratio"], 12, fields, "line")
-        self._add_labeled_entry(form, "页面宽 (mm)", page_cfg["width_mm"], 12, fields, "page_w")
-        self._add_labeled_entry(form, "页面高 (mm)", page_cfg["height_mm"], 12, fields, "page_h")
-        self._add_labeled_entry(form, "units/em", layout_cfg["font_units_per_em"], 12, fields, "units")
+        self._add_labeled_entry(param_section, "字格", layout_cfg["cell_size_mm"], 12, fields, "cell")
+        self._add_labeled_entry(param_section, "字距系数", layout_cfg["char_spacing_ratio"], 12, fields, "char")
+        self._add_labeled_entry(param_section, "行距系数", layout_cfg["line_spacing_ratio"], 12, fields, "line")
+        self._add_labeled_entry(param_section, "页面宽", page_cfg["width_mm"], 12, fields, "page_w")
+        self._add_labeled_entry(param_section, "页面高", page_cfg["height_mm"], 12, fields, "page_h")
+        self._add_labeled_entry(param_section, "units/em", layout_cfg["font_units_per_em"], 12, fields, "units")
 
-        ttk.Label(form, text="排版方向").pack(anchor=tk.W, pady=(6, 0))
-        ttk.Combobox(form, values=list(SUPPORTED_DIRECTIONS), textvariable=direction_var, state="readonly").pack(fill=tk.X)
+        ttk.Label(param_section, text="排版方向").pack(anchor=tk.W, pady=(6, 0))
+        ttk.Combobox(
+            param_section,
+            values=list(SUPPORTED_DIRECTIONS),
+            textvariable=direction_var,
+            state="readonly",
+        ).pack(fill=tk.X)
 
         def run_layout() -> None:
             text_value = text_widget.get("1.0", tk.END).strip()  # 取出输入内容并去掉多余空白
@@ -119,7 +137,11 @@ class PlotterApp(tk.Tk):
                 self.log(_format_missing_table(result.missing_chars))
             messagebox.showinfo("完成", f"SVG 已生成：{result.output_path}")
 
-        ttk.Button(window, text="生成 SVG", command=run_layout).pack(pady=12)
+        action_bar = ttk.Frame(window)
+        action_bar.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 12))
+        action_bar.columnconfigure(0, weight=1)
+        ttk.Label(action_bar, text="提示：可用鼠标滚轮浏览所有参数").grid(row=0, column=0, sticky="w")
+        ttk.Button(action_bar, text="生成 SVG", command=run_layout).grid(row=0, column=1, sticky="e")
 
     # --- G-code 后处理 -------------------------------------------------
     def _open_gcode_window(self) -> None:
@@ -287,3 +309,48 @@ def _format_missing_table(missing: Iterable[str]) -> str:
 def launch() -> None:
     app = PlotterApp()
     app.mainloop()
+
+
+class _ScrollableFrame(ttk.Frame):
+    """为表单提供垂直滚动能力，保证按钮不因窗口过小而不可见。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self._canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        self._canvas.grid(row=0, column=0, sticky="nsew")  # 画布承担滚动区域
+        scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self._canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.body = ttk.Frame(self._canvas)
+        self._window_id = self._canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self.body.bind("<Configure>", self._sync_scrollregion)
+        self._canvas.bind("<Configure>", self._sync_width)
+        _bind_mousewheel(self.body, self._canvas)
+
+    def _sync_scrollregion(self, event: tk.Event) -> None:
+        """根据内部控件尺寸实时更新滚动范围。"""
+
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _sync_width(self, event: tk.Event) -> None:
+        """保持内部 Frame 宽度与画布一致，避免出现水平滚动条。"""
+
+        self._canvas.itemconfigure(self._window_id, width=event.width)
+
+
+def _bind_mousewheel(widget: tk.Misc, canvas: tk.Canvas) -> None:
+    """统一鼠标滚轮事件，兼容 Windows / macOS / Linux。"""
+
+    def _on_mousewheel(event: tk.Event) -> None:
+        delta = event.delta if event.delta else 0
+        if delta == 0:
+            return
+        canvas.yview_scroll(int(-delta / 120), "units")
+
+    widget.bind("<MouseWheel>", _on_mousewheel, add=True)
+    widget.bind("<Button-4>", lambda _: canvas.yview_scroll(-1, "units"), add=True)
+    widget.bind("<Button-5>", lambda _: canvas.yview_scroll(1, "units"), add=True)
