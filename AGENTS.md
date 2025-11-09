@@ -5,3 +5,4 @@
 - 2025-11-08：完成 gcode_post 模块与 post 子命令，支持自动补速、蘸墨/换纸统计。
 - 2025-11-08：新增 tkinter GUI，整合排版/G-code/配置操作并完善注释。
 - 2025-11-08：补写 README，汇总安装步骤、CLI/GUI 用法与配置说明。
+- 2025-11-09：切换 uv/脚本命名，提供 inkplot、inkplot-gui 入口并同步 README。

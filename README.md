@@ -16,14 +16,16 @@ config.json       # 可自定义纸张、间距、宏模板等配置
 
 ## 安装与运行（最小可运行示例）
 
-1. **安装依赖**（推荐使用 uv 或 pip）
+1. **安装依赖**（推荐使用 uv，自动读取 pyproject 配置）
    ```bash
-   pip install -e .
+   uv pip install -e .
+   # 或未来从 PyPI 获取：
+   uv pip install inkpath-pipeline
    ```
 2. **准备字体**：将包含 `<glyph>` 的 SVG 字体文件放到任意路径，例如 `font.svg`。
 3. **文本排版**：
    ```bash
-   inkpath layout \
+   inkplot layout \
      --text "书写流水线" \
      --font-svg /path/to/font.svg \
      --output outputs/sample.svg
@@ -31,14 +33,14 @@ config.json       # 可自定义纸张、间距、宏模板等配置
    终端会打印缺字表格，`outputs/sample.svg` 可直接用 Inkscape 打开并导出 G-code。
 4. **G-code 后处理**：
    ```bash
-   inkpath post \
+   inkplot post \
      --input inputs/raw.nc \
      --output outputs/with-macros.nc
    ```
    程序会自动在第二行补 `G1 F{default_feedrate}`，并按配置插入蘸墨/换纸宏，同时打印“蘸墨/换纸次数”。
 5. **GUI 体验**：
    ```bash
-   inkpath-gui
+   inkplot-gui
    ```
    左侧三个按钮分别触发排版、后处理与配置编辑；右侧滚动日志会记录缺字、宏插入次数等信息。
 

@@ -7,5 +7,5 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-inkpath = "plotter_tool.cli:main"
-inkpath-gui = "plotter_tool.gui:launch"
+inkplot = "plotter_tool.cli:main"
+inkplot-gui = "plotter_tool.gui:launch"
