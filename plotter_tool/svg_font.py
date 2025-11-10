@@ -167,21 +167,26 @@ def _position_for_char(
     char_step: float,
     line_step: float,
 ) -> Tuple[float, float, int, int]:
-    """根据方向返回当前字的 translate，并更新下一次的行列指针。"""
+    """按照“左上角为原点、第四象限取值”的约定计算 translate，并推进行列指针。
+
+    - X 轴始终向右为正；
+    - Y 轴必须向下为负，因此行号在乘 line_step 前需要 +1，确保任何字符都不会落在 Y=0 上；
+    - 这样导出的 SVG 在肉眼看来会上移一行，但在数值空间完整位于第四象限，方便直接转 G-code。
+    """
 
     if direction == "horizontal":
         if col >= max_cols:
             col = 0
             row += 1
         x = col * char_step
-        y = -row * line_step  # 写字机 Y 向下为负值
+        y = -(row + 1) * line_step  # 始终保持 Y<0，避免落在坐标轴上
         col += 1
     else:  # vertical
         if row >= max_rows:
             row = 0
             col += 1
         x = col * char_step
-        y = -row * line_step
+        y = -(row + 1) * line_step  # 垂直排版同样遵循第四象限
         row += 1
     return x, y, col, row
 
@@ -196,8 +201,28 @@ def _fallback_path(units: float) -> str:
     return f"M{margin} {top} L{margin} {bottom} L{margin + size} {bottom} L{margin + size} {top} Z"
 
 
+def _append_page_frame(svg_root: ET.Element, params: LayoutParams) -> None:
+    """添加纸框用于肉眼校验：左上角 (0,0)，右下角 (page_width, -page_height)。"""
+
+    ET.SubElement(
+        svg_root,
+        "rect",
+        attrib={
+            "id": "page-frame",
+            "x": "0",
+            "y": f"{-params.page_height}",
+            "width": f"{params.page_width}",
+            "height": f"{params.page_height}",
+            "fill": "none",
+            "stroke": "#999999",
+            "stroke-width": "0.2",
+            "vector-effect": "non-scaling-stroke",
+        },
+    )
+
+
 def _build_svg_root(params: LayoutParams, nodes: Iterable[_GlyphPlacement]) -> ET.Element:
-    """将所有字符组装成 SVG DOM。"""
+    """将所有字符组装成 SVG DOM，并补充纸框辅助线。"""
 
     svg_root = ET.Element(
         "svg",
@@ -208,6 +233,7 @@ def _build_svg_root(params: LayoutParams, nodes: Iterable[_GlyphPlacement]) -> E
             "viewBox": f"0 {-params.page_height} {params.page_width} {params.page_height}",
         },
     )
+    _append_page_frame(svg_root, params)
     for placement in nodes:
         group = ET.SubElement(
             svg_root,
