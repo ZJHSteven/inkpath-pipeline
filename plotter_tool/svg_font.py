@@ -146,12 +146,14 @@ def _build_layout(params: LayoutParams, glyph_map: Dict[str, str]) -> Tuple[List
         translate_x, translate_y, col, row = _position_for_char(
             col, row, params.direction, max_cols, max_rows, char_step, line_step
         )
+        # 为了保证字符整体留在 y>=0 的范围内，我们把基准点放到格子底部。
+        baseline_y = translate_y + params.cell_size
         placement = _GlyphPlacement(
             index=len(placements) + 1,
             char=char,
             path_data=path_data,
             translate_x=translate_x,
-            translate_y=translate_y,
+            translate_y=baseline_y,
             scale=scale,
         )
         placements.append(placement)
@@ -167,21 +169,25 @@ def _position_for_char(
     char_step: float,
     line_step: float,
 ) -> Tuple[float, float, int, int]:
-    """以左上角为原点、屏幕坐标系（x 向右、y 向下）计算 translate，并同步推进行列指针。"""
+    """以左上角为原点、屏幕坐标系（x 向右、y 向下）计算当前格子的左上角，同时返回下一个字符的行列索引。
+
+    这里返回的是“格子左上角”而非基线位置，调用方需按需要追加基线偏移。
+    ``max_cols``/``max_rows`` 控制自动换行/换列，确保矩阵不越界。
+    """
 
     if direction == "horizontal":
         if col >= max_cols:
             col = 0  # 从下一行第 0 列继续写
             row += 1  # 垂直方向往下移动一整行
-        x = col * char_step  # 列号 * 单元宽 = 实际 x 坐标
-        y = row * line_step  # 行号 * 单元高 = 实际 y 坐标
+        x = col * char_step  # 列号 * 单元宽 = 当前格子的左上角 x
+        y = row * line_step  # 行号 * 单元高 = 当前格子的左上角 y
         col += 1  # 准备处理本行下一个字符
     else:  # vertical
         if row >= max_rows:
             row = 0  # 纵排写满一列后从新一列顶端开始
             col += 1  # x 方向右移一个单元宽度
-        x = col * char_step  # 列数直接映射到 x 坐标
-        y = row * line_step  # 行数直接映射到 y 坐标
+        x = col * char_step  # 列数直接映射到当前格子的左上角 x
+        y = row * line_step  # 行数直接映射到当前格子的左上角 y
         row += 1  # 垂直排版下一个字符继续往下
     return x, y, col, row
 
@@ -236,9 +242,11 @@ def _build_svg_root(params: LayoutParams, nodes: Iterable[_GlyphPlacement]) -> E
             attrib={
                 "id": f"char-{placement.index:03d}",
                 "aria-label": placement.char,
+                # 这里 scale 的 y 轴系数取负值，用于把字体坐标系（数学坐标，y 向上）翻回屏幕坐标。
+                # 因为 translate_y 已经指向格子底部，所以翻转不会让字符落到负坐标区。
                 "transform": (
                     f"translate({placement.translate_x:.3f}, {placement.translate_y:.3f}) "
-                    f"scale({placement.scale:.5f}, {placement.scale:.5f})"
+                    f"scale({placement.scale:.5f}, {-placement.scale:.5f})"
                 ),
             },
         )
