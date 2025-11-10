@@ -167,27 +167,22 @@ def _position_for_char(
     char_step: float,
     line_step: float,
 ) -> Tuple[float, float, int, int]:
-    """按照“左上角为原点、第四象限取值”的约定计算 translate，并推进行列指针。
-
-    - X 轴始终向右为正；
-    - Y 轴必须向下为负，因此行号在乘 line_step 前需要 +1，确保任何字符都不会落在 Y=0 上；
-    - 这样导出的 SVG 在肉眼看来会上移一行，但在数值空间完整位于第四象限，方便直接转 G-code。
-    """
+    """以左上角为原点、屏幕坐标系（x 向右、y 向下）计算 translate，并同步推进行列指针。"""
 
     if direction == "horizontal":
         if col >= max_cols:
-            col = 0
-            row += 1
-        x = col * char_step
-        y = -(row + 1) * line_step  # 始终保持 Y<0，避免落在坐标轴上
-        col += 1
+            col = 0  # 从下一行第 0 列继续写
+            row += 1  # 垂直方向往下移动一整行
+        x = col * char_step  # 列号 * 单元宽 = 实际 x 坐标
+        y = row * line_step  # 行号 * 单元高 = 实际 y 坐标
+        col += 1  # 准备处理本行下一个字符
     else:  # vertical
         if row >= max_rows:
-            row = 0
-            col += 1
-        x = col * char_step
-        y = -(row + 1) * line_step  # 垂直排版同样遵循第四象限
-        row += 1
+            row = 0  # 纵排写满一列后从新一列顶端开始
+            col += 1  # x 方向右移一个单元宽度
+        x = col * char_step  # 列数直接映射到 x 坐标
+        y = row * line_step  # 行数直接映射到 y 坐标
+        row += 1  # 垂直排版下一个字符继续往下
     return x, y, col, row
 
 
@@ -202,7 +197,7 @@ def _fallback_path(units: float) -> str:
 
 
 def _append_page_frame(svg_root: ET.Element, params: LayoutParams) -> None:
-    """添加纸框用于肉眼校验：左上角 (0,0)，右下角 (page_width, -page_height)。"""
+    """添加纸框辅助线：左上角 (0,0)，右下角 (page_width, page_height)。"""
 
     ET.SubElement(
         svg_root,
@@ -210,7 +205,7 @@ def _append_page_frame(svg_root: ET.Element, params: LayoutParams) -> None:
         attrib={
             "id": "page-frame",
             "x": "0",
-            "y": f"{-params.page_height}",
+            "y": "0",
             "width": f"{params.page_width}",
             "height": f"{params.page_height}",
             "fill": "none",
@@ -230,7 +225,7 @@ def _build_svg_root(params: LayoutParams, nodes: Iterable[_GlyphPlacement]) -> E
             "xmlns": "http://www.w3.org/2000/svg",
             "width": f"{params.page_width}mm",
             "height": f"{params.page_height}mm",
-            "viewBox": f"0 {-params.page_height} {params.page_width} {params.page_height}",
+            "viewBox": f"0 0 {params.page_width} {params.page_height}",
         },
     )
     _append_page_frame(svg_root, params)
@@ -243,7 +238,7 @@ def _build_svg_root(params: LayoutParams, nodes: Iterable[_GlyphPlacement]) -> E
                 "aria-label": placement.char,
                 "transform": (
                     f"translate({placement.translate_x:.3f}, {placement.translate_y:.3f}) "
-                    f"scale({placement.scale:.5f}, {-placement.scale:.5f})"
+                    f"scale({placement.scale:.5f}, {placement.scale:.5f})"
                 ),
             },
         )
