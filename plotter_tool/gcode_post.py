@@ -1,21 +1,22 @@
 """gcode_post.py
 =================
-该模块负责对原始 G-code 进行自动化润色：
-1. 在文件开头补齐缺失的进给速度；
-2. 按计数插入蘸墨与换纸宏；
-3. 确保只有在抬笔高度才执行宏，避免拖笔。
+该模块负责对两个独立的 G-code 进行有序合并：
+1. 写字 G-code -> 可选择三种蘸墨策略（关闭/按特殊标记/按笔画计数）；
+2. 自动插入一次换纸宏，确保纸张切换在抬笔高度完成；
+3. 绘画 G-code -> 固定按笔画计数蘸墨；
+最终输出单一 G-code 文件，供 GRBL 直接运行。
 
-实现细节：
-- 通过状态机记录当前 Z 值、笔状态与计数器；
-- 所有磁盘 I/O 与字符串处理都集中在该模块，CLI/GUI 仅负责参数收集；
-- 宏模板允许使用 `{ink_x}` 这类占位符，便于配置文件直接写坐标。
+实现约定：
+- 所有磁盘 I/O 均集中在本模块，调用方只需传入路径与配置即可；
+- 宏模板允许通过 format_map 使用自定义坐标占位符；
+- 错误与边界检查拆分为独立函数，便于 GUI/CLI 统一捕获。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Literal
 import logging
 import re
 
@@ -26,32 +27,46 @@ MOTION_PREFIXES = ("G1", "G01")
 COMMENT_PREFIXES = (";", "(")
 FLOAT_EPS = 1e-4
 
+InkMode = Literal["off", "marker", "stroke"]
+INK_MODE_SET = {"off", "marker", "stroke"}
+
 
 class GcodePostError(RuntimeError):
-    """后处理失败时的统一异常。"""
+    """后处理失败时的统一异常，方便主流程捕获友好提示。"""
+
+
+@dataclass(frozen=True)
+class JobParams:
+    """描述单个 G-code 作业的输入与蘸墨策略。"""
+
+    name: str
+    input_path: Path
+    ink_mode: InkMode
+    stroke_interval: int | None = None
 
 
 @dataclass(frozen=True)
 class PostParams:
     """承载后处理所需的全部外部参数。"""
 
-    input_path: Path
+    writing: JobParams
+    drawing: JobParams
     output_path: Path
     pen_up_z: float
     pen_down_z: float
-    insert_every_n_moves: int
-    insert_every_n_ink: int
     default_feedrate: float
     ink_macro: List[str]
     paper_macro: List[str]
     macro_context: Dict[str, float]
+    marker_token: str
 
 
 @dataclass(frozen=True)
 class PostResult:
-    """统计信息，便于 CLI/GUI 打印提示。"""
+    """统计信息，帮助上层 UI 显示蘸墨与换纸次数。"""
 
-    ink_times: int
+    writing_ink_times: int
+    drawing_ink_times: int
     paper_times: int
     total_lines: int
     output_path: Path
@@ -59,32 +74,60 @@ class PostResult:
 
 @dataclass
 class _State:
-    """内部运行时状态，拆分字段方便调试。"""
+    """运行时状态：仅跟踪 Z 轴与笔状态，保持逻辑清晰。"""
 
     current_z: float
     pen_down: bool
-    move_counter: int = 0
-    ink_counter: int = 0
 
 
 def post_process(params: PostParams) -> PostResult:
-    """读写 G-code 并返回统计结果。"""
+    """串联写字/换纸/绘画三个阶段并输出合并后的 G-code。"""
 
     _validate_params(params)
-    lines = params.input_path.read_text(encoding="utf-8").splitlines()
-    if not lines:
-        raise GcodePostError("输入 G-code 为空")
-    lines = _ensure_feedrate(lines, params.default_feedrate)
-
+    buffer: List[str] = []
     state = _State(current_z=params.pen_up_z, pen_down=False)
-    output_lines: List[str] = []
-    ink_insertions = 0
-    paper_insertions = 0
 
+    writing_ink = _process_job(params.writing, params, state, buffer)
+    paper_times = _insert_paper_change(buffer, params, state)
+    drawing_ink = _process_job(params.drawing, params, state, buffer)
+
+    params.output_path.write_text("\n".join(buffer) + "\n", encoding="utf-8")
+    logger.info("G-code 已写入 %s", params.output_path)
+    return PostResult(
+        writing_ink_times=writing_ink,
+        drawing_ink_times=drawing_ink,
+        paper_times=paper_times,
+        total_lines=len(buffer),
+        output_path=params.output_path,
+    )
+
+
+def _process_job(job: JobParams, params: PostParams, state: _State, buffer: List[str]) -> int:
+    """读取单个作业文件并依据策略插入蘸墨宏。"""
+
+    lines = _read_gcode_lines(job, params.default_feedrate)
+    ink_counter = 0
+    move_counter = 0
+
+    buffer.append(f"; === {job.name} 开始 ===")
     for raw_line in lines:
         stripped = raw_line.strip()
+
+        if job.ink_mode == "marker" and _is_marker_line(stripped, params.marker_token):
+            ink_counter += 1
+            buffer.append(f"; {job.name} 手动蘸墨 #{ink_counter}")
+            _inject_macro(
+                buffer,
+                params.ink_macro,
+                params,
+                state,
+                note=f"{job.name} 手动蘸墨 #{ink_counter}",
+            )
+            move_counter = 0
+            continue
+
         if not stripped or stripped.startswith(COMMENT_PREFIXES):
-            output_lines.append(raw_line)
+            buffer.append(raw_line)
             continue
 
         cmd = stripped.split()[0].upper()
@@ -94,56 +137,85 @@ def post_process(params: PostParams) -> PostResult:
             state.pen_down = z_value >= params.pen_down_z - FLOAT_EPS
 
         if cmd.startswith(MOTION_PREFIXES) and _contains_xy(stripped) and state.pen_down:
-            state.move_counter += 1
+            move_counter += 1
 
-        output_lines.append(raw_line)
+        buffer.append(raw_line)
 
-        if params.insert_every_n_moves and state.move_counter and state.move_counter % params.insert_every_n_moves == 0:
-            ink_insertions += 1
-            _inject_macro(
-                output_lines,
-                params.ink_macro,
-                params,
-                state,
-                note=f"蘸墨 #{ink_insertions}",
-            )
-            state.move_counter = 0
-            if params.insert_every_n_ink and ink_insertions % params.insert_every_n_ink == 0:
-                paper_insertions += 1
+        if job.ink_mode == "stroke" and job.stroke_interval:
+            if move_counter and move_counter % job.stroke_interval == 0:
+                ink_counter += 1
                 _inject_macro(
-                    output_lines,
-                    params.paper_macro,
+                    buffer,
+                    params.ink_macro,
                     params,
                     state,
-                    note=f"换纸 #{paper_insertions}",
+                    note=f"{job.name} 自动蘸墨 #{ink_counter}",
                 )
+                move_counter = 0
 
-    params.output_path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
-    logger.info("G-code 已写入 %s", params.output_path)
-    return PostResult(
-        ink_times=ink_insertions,
-        paper_times=paper_insertions,
-        total_lines=len(output_lines),
-        output_path=params.output_path,
-    )
+    buffer.append(f"; === {job.name} 结束 ===")
+    buffer.append("")
+    return ink_counter
+
+
+def _insert_paper_change(buffer: List[str], params: PostParams, state: _State) -> int:
+    """在两个作业之间插入一次换纸宏。"""
+
+    if not params.paper_macro:
+        logger.warning("配置未提供换纸宏，跳过自动换纸")
+        return 0
+    buffer.append("; === 换纸 ===")
+    _inject_macro(buffer, params.paper_macro, params, state, note="换纸 #1")
+    buffer.append("")
+    return 1
+
+
+def _read_gcode_lines(job: JobParams, default_feed: float) -> List[str]:
+    """读取 G-code，若缺乏进给速度则自动补上一条。"""
+
+    if not job.input_path.exists():
+        raise FileNotFoundError(f"找不到 {job.name} G-code：{job.input_path}")
+    lines = job.input_path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise GcodePostError(f"{job.name} G-code 为空：{job.input_path}")
+    return _ensure_feedrate(lines, default_feed)
 
 
 def _validate_params(params: PostParams) -> None:
-    """基础参数合法性检查。"""
+    """集中处理所有基础合法性检查。"""
 
-    if not params.input_path.exists():
-        raise FileNotFoundError(f"找不到 gcode：{params.input_path}")
-    if params.insert_every_n_moves <= 0:
-        raise ValueError("insert_every_n_moves 必须为正整数")
-    if params.insert_every_n_ink < 0:
-        raise ValueError("insert_every_n_ink 不能为负数")
     if params.pen_down_z <= params.pen_up_z:
         raise ValueError("pen_down_z 必须大于 pen_up_z")
+
+    marker = params.marker_token.strip()
+    for job in (params.writing, params.drawing):
+        _validate_job(job, marker)
+
     params.output_path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _validate_job(job: JobParams, marker: str) -> None:
+    """校验单个作业配置，确保模式与参数匹配。"""
+
+    if not job.input_path.exists():
+        raise FileNotFoundError(f"{job.name} G-code 不存在：{job.input_path}")
+    if job.ink_mode not in INK_MODE_SET:
+        raise ValueError(f"{job.name} ink_mode 不受支持：{job.ink_mode}")
+    if job.ink_mode == "stroke" and (job.stroke_interval or 0) <= 0:
+        raise ValueError(f"{job.name} 需要正整数 stroke_interval")
+    if job.ink_mode == "marker" and not marker:
+        raise ValueError(f"{job.name} 选择 marker 模式但 marker_token 为空")
+
+
+def _is_marker_line(line: str, marker_token: str) -> bool:
+    """判断当前行是否为用户手动插入的蘸墨标记。"""
+
+    token = marker_token.strip()
+    return bool(token) and line == token
+
+
 def _ensure_feedrate(lines: List[str], default_feed: float) -> List[str]:
-    """检查前两行是否包含 F，缺失则在首行后补一条 G1 Fxxx。"""
+    """检查前两条有效指令是否包含 F，缺失则自动补齐。"""
 
     candidate_indexes: List[int] = []
     for idx, line in enumerate(lines):
@@ -171,8 +243,8 @@ def _has_feedrate(line: str) -> bool:
 def _contains_xy(line: str) -> bool:
     """判断是否包含 X/Y，决定是否计入绘图次数。"""
 
-    line_upper = line.upper()
-    return "X" in line_upper or "Y" in line_upper
+    upper = line.upper()
+    return "X" in upper or "Y" in upper
 
 
 def _extract_axis(line: str, axis: str) -> float | None:
@@ -192,7 +264,7 @@ def _inject_macro(
     state: _State,
     note: str,
 ) -> None:
-    """把宏指令插入输出缓冲。"""
+    """把宏指令插入输出缓冲，并维护抬笔状态。"""
 
     if not macro_lines:
         logger.warning("%s: 配置的宏为空，跳过插入", note)
@@ -215,7 +287,6 @@ def _inject_macro(
             state.pen_down = z_value >= params.pen_down_z - FLOAT_EPS
     buffer.append(f"; ---- {note} 结束 ----")
 
-    # 默认宏末尾会回到抬笔，如未回则强制回
     if abs(state.current_z - params.pen_up_z) > FLOAT_EPS:
         buffer.append(f"G0 Z{params.pen_up_z}")
         state.current_z = params.pen_up_z

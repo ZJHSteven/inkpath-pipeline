@@ -64,10 +64,29 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             "G4 P1.0",
         ],
     },
+    "paths": {
+        "layout": {
+            "font_svg": "assets/fonts/ink_font.svg",
+            "output_svg": "artifacts/layout.svg",
+        },
+        "post": {
+            "writing_input": "artifacts/gcode/writing.nc",
+            "drawing_input": "artifacts/gcode/drawing.nc",
+            "merged_output": "artifacts/gcode/merged.nc",
+        },
+    },
     "gcode": {
-        "insert_every_n_moves": 80,
-        "insert_every_n_ink": 5,
         "default_feedrate": 1000,
+        "marker": {
+            "token": ";#AUTO_INK#",
+        },
+        "writing": {
+            "ink_mode": "marker",
+            "stroke_interval": 40,
+        },
+        "drawing": {
+            "stroke_interval": 80,
+        },
     },
 }
 
@@ -81,11 +100,12 @@ def ensure_config_file(path: Path = CONFIG_PATH) -> Path:
 
 
 def load_config(path: Path = CONFIG_PATH) -> Dict[str, Any]:
-    """加载配置并返回 dict；若解析失败则抛出 ConfigError。"""
+    """加载配置，将缺失字段补齐默认值后返回 dict。"""
 
     try:
         ensure_config_file(path)
-        return json.loads(path.read_text(encoding="utf-8"))
+        user_cfg = json.loads(path.read_text(encoding="utf-8"))
+        return _deep_merge(DEFAULT_CONFIG, user_cfg)
     except json.JSONDecodeError as exc:  # pragma: no cover - 极端错误路径
         raise ConfigError(f"无法解析配置文件 {path}: {exc}") from exc
 

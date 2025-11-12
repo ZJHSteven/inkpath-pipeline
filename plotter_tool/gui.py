@@ -16,7 +16,7 @@ from typing import Dict, Iterable
 
 from .config import load_config, save_config
 from .svg_font import LayoutParams, SUPPORTED_DIRECTIONS, export_text
-from .gcode_post import PostParams, build_macro_context, post_process
+from .gcode_post import JobParams, PostParams, build_macro_context, post_process
 
 
 class PlotterApp(tk.Tk):
@@ -69,14 +69,15 @@ class PlotterApp(tk.Tk):
 
         layout_cfg = self.config_data["layout"]
         page_cfg = self.config_data["page"]
+        layout_paths = self.config_data.get("paths", {}).get("layout", {})
 
         text_frame = ttk.LabelFrame(window, text="输入文字（可多行）")
         text_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
         text_widget = tk.Text(text_frame, height=6, wrap=tk.WORD)
         text_widget.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        font_var = tk.StringVar()
-        output_var = tk.StringVar()
+        font_var = tk.StringVar(value=layout_paths.get("font_svg", ""))
+        output_var = tk.StringVar(value=layout_paths.get("output_svg", ""))
         direction_var = tk.StringVar(value=layout_cfg["direction"])
 
         scrollable_form = _ScrollableFrame(window)
@@ -85,8 +86,20 @@ class PlotterApp(tk.Tk):
 
         path_section = ttk.LabelFrame(form, text="路径配置")
         path_section.pack(fill=tk.X, pady=(0, 8))
-        self._add_path_field(path_section, "字体 SVG", font_var, filedialog.askopenfilename)
-        self._add_path_field(path_section, "输出 SVG", output_var, filedialog.asksaveasfilename)
+        self._add_path_field(
+            path_section,
+            "字体 SVG",
+            font_var,
+            filedialog.askopenfilename,
+            initial_path=layout_paths.get("font_svg"),
+        )
+        self._add_path_field(
+            path_section,
+            "输出 SVG",
+            output_var,
+            filedialog.asksaveasfilename,
+            initial_path=layout_paths.get("output_svg"),
+        )
 
         param_section = ttk.LabelFrame(form, text="排版参数（单位：mm）")
         param_section.pack(fill=tk.X, pady=(0, 8))
@@ -146,61 +159,160 @@ class PlotterApp(tk.Tk):
     # --- G-code 后处理 -------------------------------------------------
     def _open_gcode_window(self) -> None:
         window = tk.Toplevel(self)
-        window.title("G-code 后处理")
-        window.geometry("520x440")
+        window.title("G-code 合并后处理")
+        window.geometry("640x640")
 
-        input_var = tk.StringVar()
-        output_var = tk.StringVar()
-        self._add_path_field(window, "原始 G-code", input_var, filedialog.askopenfilename)
-        self._add_path_field(window, "输出 G-code", output_var, filedialog.asksaveasfilename)
-
-        form = ttk.Frame(window)
-        form.pack(fill=tk.X, padx=8, pady=8)
-        fields: Dict[str, tk.Entry] = {}
+        post_paths = self.config_data.get("paths", {}).get("post", {})
         plotter = self.config_data["plotter"]
         gcfg = self.config_data["gcode"]
-        self._add_labeled_entry(form, "抬笔 Z", plotter["pen_up_z"], 10, fields, "pen_up")
-        self._add_labeled_entry(form, "落笔 Z", plotter["pen_down_z"], 10, fields, "pen_down")
-        self._add_labeled_entry(form, "每 N 次蘸墨", gcfg["insert_every_n_moves"], 10, fields, "insert")
-        self._add_labeled_entry(form, "每 N 次换纸", gcfg["insert_every_n_ink"], 10, fields, "paper")
-        self._add_labeled_entry(form, "默认 Feed", gcfg["default_feedrate"], 10, fields, "feed")
+        writing_cfg = gcfg.get("writing", {})
+        drawing_cfg = gcfg.get("drawing", {})
+        marker_cfg = gcfg.get("marker", {})
+
+        writing_var = tk.StringVar(value=post_paths.get("writing_input", ""))
+        drawing_var = tk.StringVar(value=post_paths.get("drawing_input", ""))
+        output_var = tk.StringVar(value=post_paths.get("merged_output", ""))
+
+        path_section = ttk.LabelFrame(window, text="G-code 路径")
+        path_section.pack(fill=tk.X, padx=8, pady=8)
+        self._add_path_field(
+            path_section,
+            "写字 G-code",
+            writing_var,
+            filedialog.askopenfilename,
+            initial_path=post_paths.get("writing_input"),
+        )
+        self._add_path_field(
+            path_section,
+            "绘画 G-code",
+            drawing_var,
+            filedialog.askopenfilename,
+            initial_path=post_paths.get("drawing_input"),
+        )
+        self._add_path_field(
+            path_section,
+            "合并输出",
+            output_var,
+            filedialog.asksaveasfilename,
+            initial_path=post_paths.get("merged_output"),
+        )
+
+        fields: Dict[str, tk.Entry] = {}
+
+        writing_section = ttk.LabelFrame(window, text="写字蘸墨策略")
+        writing_section.pack(fill=tk.X, padx=8, pady=(0, 8))
+        writing_mode_var = tk.StringVar(value=writing_cfg.get("ink_mode", "marker"))
+        ttk.Label(writing_section, text="蘸墨模式").pack(anchor=tk.W)
+        ttk.Combobox(
+            writing_section,
+            values=["off", "marker", "stroke"],
+            textvariable=writing_mode_var,
+            state="readonly",
+        ).pack(fill=tk.X, pady=(0, 6))
+        self._add_labeled_entry(
+            writing_section,
+            "笔画阈值（stroke 模式）",
+            writing_cfg.get("stroke_interval", 40),
+            12,
+            fields,
+            "writing_interval",
+        )
+        ttk.Label(writing_section, text="标记行（marker 模式整行匹配）").pack(anchor=tk.W)
+        marker_var = tk.StringVar(value=marker_cfg.get("token", ""))
+        marker_entry = ttk.Entry(writing_section, textvariable=marker_var)
+        marker_entry.pack(fill=tk.X, pady=(0, 6))
+
+        drawing_section = ttk.LabelFrame(window, text="绘画蘸墨策略（固定笔画计数）")
+        drawing_section.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self._add_labeled_entry(
+            drawing_section,
+            "笔画阈值",
+            drawing_cfg.get("stroke_interval", 80),
+            12,
+            fields,
+            "drawing_interval",
+        )
+
+        machine_section = ttk.LabelFrame(window, text="机台参数")
+        machine_section.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self._add_labeled_entry(machine_section, "抬笔 Z", plotter["pen_up_z"], 12, fields, "pen_up")
+        self._add_labeled_entry(machine_section, "落笔 Z", plotter["pen_down_z"], 12, fields, "pen_down")
+        self._add_labeled_entry(machine_section, "默认 Feed", gcfg["default_feedrate"], 12, fields, "feed")
 
         def run_post() -> None:
-            if not input_var.get() or not output_var.get():
-                messagebox.showwarning("缺少路径", "请指定输入与输出 G-code。")
+            writing_path = writing_var.get().strip()
+            drawing_path = drawing_var.get().strip()
+            output_path = output_var.get().strip()
+            if not writing_path or not drawing_path or not output_path:
+                messagebox.showwarning("缺少路径", "请完善写字/绘画/输出三条路径。")
                 return
+
+            def _read_optional_int(key: str) -> int | None:
+                raw = fields[key].get().strip()
+                return int(raw) if raw else None
+
+            writing_interval = _read_optional_int("writing_interval")
+            drawing_interval = _read_optional_int("drawing_interval")
+            writing_mode = writing_mode_var.get()
+            if writing_mode == "stroke" and not writing_interval:
+                messagebox.showwarning("缺少写字阈值", "写字选择 stroke 模式时必须填写笔画阈值。")
+                return
+            if not drawing_interval:
+                messagebox.showwarning("缺少绘画阈值", "请填写绘画阶段的笔画阈值。")
+                return
+
             try:
-                params = PostParams(  # 组装后处理参数
-                    input_path=Path(input_var.get()),
-                    output_path=Path(output_var.get()),
+                params = PostParams(
+                    writing=JobParams(
+                        name="写字",
+                        input_path=Path(writing_path),
+                        ink_mode=writing_mode,
+                        stroke_interval=writing_interval,
+                    ),
+                    drawing=JobParams(
+                        name="绘画",
+                        input_path=Path(drawing_path),
+                        ink_mode="stroke",
+                        stroke_interval=drawing_interval,
+                    ),
+                    output_path=Path(output_path),
                     pen_up_z=float(fields["pen_up"].get()),
                     pen_down_z=float(fields["pen_down"].get()),
-                    insert_every_n_moves=int(fields["insert"].get()),
-                    insert_every_n_ink=int(fields["paper"].get()),
                     default_feedrate=float(fields["feed"].get()),
                     ink_macro=self.config_data["macros"]["ink_macro"],
                     paper_macro=self.config_data["macros"]["paper_macro"],
-                    macro_context=build_macro_context(self.config_data["plotter"], self.config_data.get("positions", {})),
+                    macro_context=build_macro_context(
+                        self.config_data["plotter"],
+                        self.config_data.get("positions", {}),
+                    ),
+                    marker_token=marker_var.get().strip(),
                 )
-                result = post_process(params)  # 实际执行后处理
+                result = post_process(params)
             except Exception as exc:  # pragma: no cover
-                messagebox.showerror("后处理失败", str(exc))
-                self.log(f"[后处理失败] {exc}")
+                messagebox.showerror("处理失败", str(exc))
+                self.log(f"[处理失败] {exc}")
                 return
             self.log(
-                f"[后处理完成] 蘸墨 {result.ink_times} 次，换纸 {result.paper_times} 次，输出 {result.total_lines} 行 -> {result.output_path}"
+                f"[处理完成] 写字蘸墨 {result.writing_ink_times} 次，绘画蘸墨 {result.drawing_ink_times} 次，"
+                f"换纸 {result.paper_times} 次，总行数 {result.total_lines} -> {result.output_path}"
             )
             messagebox.showinfo("完成", f"G-code 已写入：{result.output_path}")
 
         ttk.Button(window, text="执行后处理", command=run_post).pack(pady=12)
-
     # --- 配置编辑 -----------------------------------------------------
     def _open_config_window(self) -> None:
         window = tk.Toplevel(self)
         window.title("配置管理")
-        window.geometry("560x600")
+        window.geometry("600x780")
 
         entries: Dict[str, tk.Entry] = {}
+        paths_cfg = self.config_data.get("paths", {})
+        layout_paths = paths_cfg.get("layout", {})
+        post_paths = paths_cfg.get("post", {})
+        gcfg = self.config_data["gcode"]
+        writing_cfg = gcfg.get("writing", {})
+        drawing_cfg = gcfg.get("drawing", {})
+        marker_cfg = gcfg.get("marker", {})
 
         def section(title: str) -> ttk.LabelFrame:
             frame = ttk.LabelFrame(window, text=title)
@@ -215,71 +327,116 @@ class PlotterApp(tk.Tk):
         self._add_labeled_entry(layout_frame, "字格 (mm)", self.config_data["layout"]["cell_size_mm"], 12, entries, "cell")
         self._add_labeled_entry(layout_frame, "字距系数", self.config_data["layout"]["char_spacing_ratio"], 12, entries, "char")
         self._add_labeled_entry(layout_frame, "行距系数", self.config_data["layout"]["line_spacing_ratio"], 12, entries, "line")
+        self._add_labeled_entry(layout_frame, "units/em", self.config_data["layout"]["font_units_per_em"], 12, entries, "units")
         direction_var = tk.StringVar(value=self.config_data["layout"]["direction"])
-        ttk.Label(layout_frame, text="方向").pack(anchor=tk.W)
+        ttk.Label(layout_frame, text="排版方向").pack(anchor=tk.W)
         ttk.Combobox(layout_frame, values=list(SUPPORTED_DIRECTIONS), textvariable=direction_var, state="readonly").pack(fill=tk.X)
 
-        z_frame = section("Z 设置")
+        layout_path_frame = section("排版默认路径")
+        self._add_labeled_entry(layout_path_frame, "字体 SVG", layout_paths.get("font_svg", ""), 32, entries, "layout_font_path")
+        self._add_labeled_entry(layout_path_frame, "输出 SVG", layout_paths.get("output_svg", ""), 32, entries, "layout_output_path")
+
+        post_path_frame = section("G-code 默认路径")
+        self._add_labeled_entry(post_path_frame, "写字 G-code", post_paths.get("writing_input", ""), 32, entries, "post_writing_path")
+        self._add_labeled_entry(post_path_frame, "绘画 G-code", post_paths.get("drawing_input", ""), 32, entries, "post_drawing_path")
+        self._add_labeled_entry(post_path_frame, "合并输出", post_paths.get("merged_output", ""), 32, entries, "post_output_path")
+
+        z_frame = section("Z 轴")
         self._add_labeled_entry(z_frame, "抬笔 Z", self.config_data["plotter"]["pen_up_z"], 12, entries, "pen_up")
         self._add_labeled_entry(z_frame, "落笔 Z", self.config_data["plotter"]["pen_down_z"], 12, entries, "pen_down")
         self._add_labeled_entry(z_frame, "安全 Z", self.config_data["plotter"].get("safe_z", 1.0), 12, entries, "safe_z")
 
-        pos_frame = section("墨盒/换纸")
+        pos_frame = section("蘸墨/换纸坐标")
         positions = self.config_data["positions"]
-        self._add_labeled_entry(pos_frame, "墨盒 X", positions["ink"]["x"], 12, entries, "ink_x")
-        self._add_labeled_entry(pos_frame, "墨盒 Y", positions["ink"]["y"], 12, entries, "ink_y")
+        self._add_labeled_entry(pos_frame, "蘸墨 X", positions["ink"]["x"], 12, entries, "ink_x")
+        self._add_labeled_entry(pos_frame, "蘸墨 Y", positions["ink"]["y"], 12, entries, "ink_y")
         self._add_labeled_entry(pos_frame, "换纸 X", positions["paper"]["x"], 12, entries, "paper_x")
         self._add_labeled_entry(pos_frame, "换纸 Y", positions["paper"]["y"], 12, entries, "paper_y")
 
-        gcode_frame = section("G-code")
-        gcfg = self.config_data["gcode"]
-        self._add_labeled_entry(gcode_frame, "每 N 次蘸墨", gcfg["insert_every_n_moves"], 12, entries, "insert")
-        self._add_labeled_entry(gcode_frame, "每 N 次换纸", gcfg["insert_every_n_ink"], 12, entries, "paper")
+        gcode_frame = section("G-code 参数")
         self._add_labeled_entry(gcode_frame, "默认 Feed", gcfg["default_feedrate"], 12, entries, "feed")
+        writing_mode_var = tk.StringVar(value=writing_cfg.get("ink_mode", "marker"))
+        ttk.Label(gcode_frame, text="写字蘸墨模式").pack(anchor=tk.W)
+        ttk.Combobox(gcode_frame, values=["off", "marker", "stroke"], textvariable=writing_mode_var, state="readonly").pack(fill=tk.X)
+        self._add_labeled_entry(gcode_frame, "写字笔画阈值", writing_cfg.get("stroke_interval", 40), 12, entries, "cfg_writing_interval")
+        self._add_labeled_entry(gcode_frame, "绘画笔画阈值", drawing_cfg.get("stroke_interval", 80), 12, entries, "cfg_drawing_interval")
+        ttk.Label(gcode_frame, text="Marker 标记行").pack(anchor=tk.W)
+        marker_var = tk.StringVar(value=marker_cfg.get("token", ""))
+        marker_entry = ttk.Entry(gcode_frame, textvariable=marker_var)
+        marker_entry.pack(fill=tk.X, pady=(0, 6))
 
         def save_changes() -> None:
             try:
-                new_cfg = load_config()  # 重新读取以获取最新版本
-                new_cfg["page"]["width_mm"] = float(entries["page_w"].get())  # 更新纸张宽度
-                new_cfg["page"]["height_mm"] = float(entries["page_h"].get())  # 更新纸张高度
-                new_cfg["layout"]["cell_size_mm"] = float(entries["cell"].get())  # 更新字格
-                new_cfg["layout"]["char_spacing_ratio"] = float(entries["char"].get())  # 更新字距
-                new_cfg["layout"]["line_spacing_ratio"] = float(entries["line"].get())  # 更新行距
-                new_cfg["layout"]["direction"] = direction_var.get()  # 更新方向
-                new_cfg["plotter"]["pen_up_z"] = float(entries["pen_up"].get())  # 更新抬笔
-                new_cfg["plotter"]["pen_down_z"] = float(entries["pen_down"].get())  # 更新落笔
-                new_cfg["plotter"]["safe_z"] = float(entries["safe_z"].get())  # 更新安全高度
-                new_cfg["positions"]["ink"]["x"] = float(entries["ink_x"].get())  # 更新墨盒 X
-                new_cfg["positions"]["ink"]["y"] = float(entries["ink_y"].get())  # 更新墨盒 Y
-                new_cfg["positions"]["paper"]["x"] = float(entries["paper_x"].get())  # 更新换纸 X
-                new_cfg["positions"]["paper"]["y"] = float(entries["paper_y"].get())  # 更新换纸 Y
-                new_cfg["gcode"]["insert_every_n_moves"] = int(entries["insert"].get())  # 更新蘸墨频次
-                new_cfg["gcode"]["insert_every_n_ink"] = int(entries["paper"].get())  # 更新换纸频次
-                new_cfg["gcode"]["default_feedrate"] = float(entries["feed"].get())  # 更新默认进给
+                new_cfg = load_config()
+                new_cfg["page"]["width_mm"] = float(entries["page_w"].get())
+                new_cfg["page"]["height_mm"] = float(entries["page_h"].get())
+                new_cfg["layout"]["cell_size_mm"] = float(entries["cell"].get())
+                new_cfg["layout"]["char_spacing_ratio"] = float(entries["char"].get())
+                new_cfg["layout"]["line_spacing_ratio"] = float(entries["line"].get())
+                new_cfg["layout"]["font_units_per_em"] = float(entries["units"].get())
+                new_cfg["layout"]["direction"] = direction_var.get()
+                new_cfg.setdefault("paths", {}).setdefault("layout", {})["font_svg"] = entries["layout_font_path"].get().strip()
+                new_cfg["paths"]["layout"]["output_svg"] = entries["layout_output_path"].get().strip()
+                new_cfg.setdefault("paths", {}).setdefault("post", {})["writing_input"] = entries["post_writing_path"].get().strip()
+                new_cfg["paths"]["post"]["drawing_input"] = entries["post_drawing_path"].get().strip()
+                new_cfg["paths"]["post"]["merged_output"] = entries["post_output_path"].get().strip()
+                new_cfg["plotter"]["pen_up_z"] = float(entries["pen_up"].get())
+                new_cfg["plotter"]["pen_down_z"] = float(entries["pen_down"].get())
+                new_cfg["plotter"]["safe_z"] = float(entries["safe_z"].get())
+                new_cfg["positions"]["ink"]["x"] = float(entries["ink_x"].get())
+                new_cfg["positions"]["ink"]["y"] = float(entries["ink_y"].get())
+                new_cfg["positions"]["paper"]["x"] = float(entries["paper_x"].get())
+                new_cfg["positions"]["paper"]["y"] = float(entries["paper_y"].get())
+                new_cfg["gcode"]["default_feedrate"] = float(entries["feed"].get())
+                new_cfg["gcode"]["writing"]["ink_mode"] = writing_mode_var.get()
+                new_cfg["gcode"]["writing"]["stroke_interval"] = int(entries["cfg_writing_interval"].get())
+                new_cfg["gcode"]["drawing"]["stroke_interval"] = int(entries["cfg_drawing_interval"].get())
+                new_cfg["gcode"]["marker"]["token"] = marker_var.get().strip()
                 save_config(new_cfg)
                 self.config_data = new_cfg
             except Exception as exc:  # pragma: no cover
                 messagebox.showerror("保存失败", str(exc))
                 self.log(f"[配置保存失败] {exc}")
                 return
-            self.log("[配置已保存] config.json 更新完毕")
-            messagebox.showinfo("成功", "配置写入完成，下次打开 GUI 会自动加载。")
+            self.log("[配置已更新] config.json 写入完成")
+            messagebox.showinfo("成功", "配置写入成功，重启 GUI 生效。")
 
         ttk.Button(window, text="保存配置", command=save_changes).pack(pady=12)
-
     # --- 通用控件 -----------------------------------------------------
-    def _add_path_field(self, parent: tk.Misc, label: str, var: tk.StringVar, dialog_func) -> None:
+    def _add_path_field(
+        self,
+        parent: tk.Misc,
+        label: str,
+        var: tk.StringVar,
+        dialog_func,
+        initial_path: str | None = None,
+    ) -> None:
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, padx=8, pady=4)
         ttk.Label(frame, text=label).pack(anchor=tk.W)
         ttk.Entry(frame, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        if initial_path and not var.get():
+            var.set(initial_path)
+
         def choose() -> None:
-            path = dialog_func()
+            current_hint = var.get().strip() or (initial_path or "")
+            dialog_kwargs = self._dialog_defaults(current_hint)
+            path = dialog_func(**dialog_kwargs) if dialog_kwargs else dialog_func()
             if path:
                 var.set(path)
 
         ttk.Button(frame, text="浏览", command=choose).pack(side=tk.RIGHT, padx=4)
+
+    def _dialog_defaults(self, path_hint: str) -> Dict[str, str]:
+        """根据当前文本/默认值推断文件对话框的初始目录与文件名。"""
+
+        if not path_hint:
+            return {}
+        candidate = Path(path_hint).expanduser()
+        if candidate.is_dir():
+            return {"initialdir": str(candidate)}
+        return {"initialdir": str(candidate.parent), "initialfile": candidate.name}
 
     def _add_labeled_entry(
         self,

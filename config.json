@@ -1,29 +1,20 @@
 {
-  "page": {
-    "width_mm": 210.0,
-    "height_mm": 297.0
-  },
-  "layout": {
-    "cell_size_mm": 40.0,
-    "line_spacing_ratio": 0.2,
-    "char_spacing_ratio": 0.1,
-    "direction": "horizontal",
-    "font_units_per_em": 1000.0
-  },
-  "plotter": {
-    "pen_up_z": 0.0,
-    "pen_down_z": 8.0,
-    "safe_z": 1.0
-  },
-  "positions": {
-    "ink": {
-      "x": 10.0,
-      "y": -10.0
+  "gcode": {
+    "default_feedrate": 1000,
+    "marker": {
+      "token": ";#AUTO_INK#"
     },
-    "paper": {
-      "x": 0.0,
-      "y": 0.0
+    "writing": {
+      "ink_mode": "marker",
+      "stroke_interval": 40
+    },
+    "drawing": {
+      "stroke_interval": 80
     }
+  },
+  "page": {
+    "height_mm": 297.0,
+    "width_mm": 210.0
   },
   "macros": {
     "ink_macro": [
@@ -39,9 +30,37 @@
       "G4 P1.0"
     ]
   },
-  "gcode": {
-    "insert_every_n_moves": 80,
-    "insert_every_n_ink": 5,
-    "default_feedrate": 1000
+  "plotter": {
+    "pen_down_z": 8.0,
+    "pen_up_z": 0.0,
+    "safe_z": 1.0
+  },
+  "layout": {
+    "direction": "vertical",
+    "cell_size_mm": 80.0,
+    "line_spacing_ratio": 0.2,
+    "font_units_per_em": 1000.0,
+    "char_spacing_ratio": 0.1
+  },
+  "paths": {
+    "layout": {
+      "font_svg": "assets/fonts/ink_font.svg",
+      "output_svg": "artifacts/layout.svg"
+    },
+    "post": {
+      "writing_input": "artifacts/gcode/writing.nc",
+      "drawing_input": "artifacts/gcode/drawing.nc",
+      "merged_output": "artifacts/gcode/merged.nc"
+    }
+  },
+  "positions": {
+    "ink": {
+      "x": 10.0,
+      "y": -10.0
+    },
+    "paper": {
+      "x": 0.0,
+      "y": 0.0
+    }
   }
 }
