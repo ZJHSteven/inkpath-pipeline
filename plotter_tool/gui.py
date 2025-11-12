@@ -161,6 +161,14 @@ class PlotterApp(tk.Tk):
         window = tk.Toplevel(self)
         window.title("G-code 合并后处理")
         window.geometry("640x640")
+        window.minsize(580, 520)
+
+        # 为了防止参数面板过长导致按钮区域被挤出可视区，这里将窗口拆成上下两部分：
+        # 1) 顶部使用可复用的 _ScrollableFrame 承载所有参数表单，自动提供滚动条；
+        # 2) 底部固定一个操作条，始终展示执行按钮与提示，操作时无需再滚动回底部。
+        scrollable = _ScrollableFrame(window)
+        scrollable.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+        form = scrollable.body
 
         post_paths = self.config_data.get("paths", {}).get("post", {})
         plotter = self.config_data["plotter"]
@@ -173,7 +181,7 @@ class PlotterApp(tk.Tk):
         drawing_var = tk.StringVar(value=post_paths.get("drawing_input", ""))
         output_var = tk.StringVar(value=post_paths.get("merged_output", ""))
 
-        path_section = ttk.LabelFrame(window, text="G-code 路径")
+        path_section = ttk.LabelFrame(form, text="G-code 路径")
         path_section.pack(fill=tk.X, padx=8, pady=8)
         self._add_path_field(
             path_section,
@@ -199,7 +207,7 @@ class PlotterApp(tk.Tk):
 
         fields: Dict[str, tk.Entry] = {}
 
-        writing_section = ttk.LabelFrame(window, text="写字蘸墨策略")
+        writing_section = ttk.LabelFrame(form, text="写字蘸墨策略")
         writing_section.pack(fill=tk.X, padx=8, pady=(0, 8))
         writing_mode_var = tk.StringVar(value=writing_cfg.get("ink_mode", "marker"))
         ttk.Label(writing_section, text="蘸墨模式").pack(anchor=tk.W)
@@ -222,7 +230,7 @@ class PlotterApp(tk.Tk):
         marker_entry = ttk.Entry(writing_section, textvariable=marker_var)
         marker_entry.pack(fill=tk.X, pady=(0, 6))
 
-        drawing_section = ttk.LabelFrame(window, text="绘画蘸墨策略（固定笔画计数）")
+        drawing_section = ttk.LabelFrame(form, text="绘画蘸墨策略（固定笔画计数）")
         drawing_section.pack(fill=tk.X, padx=8, pady=(0, 8))
         self._add_labeled_entry(
             drawing_section,
@@ -233,7 +241,7 @@ class PlotterApp(tk.Tk):
             "drawing_interval",
         )
 
-        machine_section = ttk.LabelFrame(window, text="机台参数")
+        machine_section = ttk.LabelFrame(form, text="机台参数")
         machine_section.pack(fill=tk.X, padx=8, pady=(0, 8))
         self._add_labeled_entry(machine_section, "抬笔 Z", plotter["pen_up_z"], 12, fields, "pen_up")
         self._add_labeled_entry(machine_section, "落笔 Z", plotter["pen_down_z"], 12, fields, "pen_down")
@@ -298,7 +306,11 @@ class PlotterApp(tk.Tk):
             )
             messagebox.showinfo("完成", f"G-code 已写入：{result.output_path}")
 
-        ttk.Button(window, text="执行后处理", command=run_post).pack(pady=12)
+        action_bar = ttk.Frame(window)
+        action_bar.pack(fill=tk.X, padx=8, pady=(8, 12))
+        action_bar.columnconfigure(0, weight=1)
+        ttk.Label(action_bar, text="提示：参数面板可滚动，按钮始终保持可见").grid(row=0, column=0, sticky="w")
+        ttk.Button(action_bar, text="执行后处理", command=run_post).grid(row=0, column=1, sticky="e")
     # --- 配置编辑 -----------------------------------------------------
     def _open_config_window(self) -> None:
         window = tk.Toplevel(self)
