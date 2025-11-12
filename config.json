@@ -2,14 +2,14 @@
   "gcode": {
     "default_feedrate": 1000,
     "marker": {
-      "token": ";#AUTO_INK#"
+      "token": "###"
     },
     "writing": {
       "ink_mode": "marker",
       "stroke_interval": 40
     },
     "drawing": {
-      "stroke_interval": 80
+      "stroke_interval": 40
     }
   },
   "page": {
@@ -44,13 +44,13 @@
   },
   "paths": {
     "layout": {
-      "font_svg": "assets/fonts/ink_font.svg",
-      "output_svg": "artifacts/layout.svg"
+      "font_svg": "assets/fonts/KaiTi.svg",
+      "output_svg": "C:/Users/ZJHSteven/Downloads/layout.svg"
     },
     "post": {
-      "writing_input": "artifacts/gcode/writing.nc",
-      "drawing_input": "artifacts/gcode/drawing.nc",
-      "merged_output": "artifacts/gcode/merged.nc"
+      "writing_input": "C:/Users/ZJHSteven/Downloads/writing.gcode",
+      "drawing_input": "C:/Users/ZJHSteven/Downloads/drawing.gcode",
+      "merged_output": "C:/Users/ZJHSteven/Downloads/merged.gcode"
     }
   },
   "positions": {
