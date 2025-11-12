@@ -303,7 +303,12 @@ class PlotterApp(tk.Tk):
     def _open_config_window(self) -> None:
         window = tk.Toplevel(self)
         window.title("配置管理")
-        window.geometry("600x780")
+        window.geometry("560x640")
+        window.minsize(520, 520)
+
+        scrollable = _ScrollableFrame(window)
+        scrollable.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        form = scrollable.body
 
         entries: Dict[str, tk.Entry] = {}
         paths_cfg = self.config_data.get("paths", {})
@@ -315,8 +320,8 @@ class PlotterApp(tk.Tk):
         marker_cfg = gcfg.get("marker", {})
 
         def section(title: str) -> ttk.LabelFrame:
-            frame = ttk.LabelFrame(window, text=title)
-            frame.pack(fill=tk.X, padx=8, pady=6)
+            frame = ttk.LabelFrame(form, text=title)
+            frame.pack(fill=tk.X, pady=6)
             return frame
 
         page_frame = section("纸张")
@@ -401,7 +406,9 @@ class PlotterApp(tk.Tk):
             self.log("[配置已更新] config.json 写入完成")
             messagebox.showinfo("成功", "配置写入成功，重启 GUI 生效。")
 
-        ttk.Button(window, text="保存配置", command=save_changes).pack(pady=12)
+        action_bar = ttk.Frame(window)
+        action_bar.pack(fill=tk.X, padx=8, pady=(0, 12))
+        ttk.Button(action_bar, text="保存配置", command=save_changes).pack(side=tk.RIGHT)
     # --- 通用控件 -----------------------------------------------------
     def _add_path_field(
         self,
