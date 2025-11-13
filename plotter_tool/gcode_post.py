@@ -107,7 +107,8 @@ def _process_job(job: JobParams, params: PostParams, state: _State, buffer: List
 
     lines = _read_gcode_lines(job, params.default_feedrate)
     ink_counter = 0
-    move_counter = 0
+    stroke_counter = 0
+    previous_pen_down = state.pen_down
 
     buffer.append(f"; === {job.name} 开始 ===")
     for raw_line in lines:
@@ -123,7 +124,8 @@ def _process_job(job: JobParams, params: PostParams, state: _State, buffer: List
                 state,
                 note=f"{job.name} 手动蘸墨 #{ink_counter}",
             )
-            move_counter = 0
+            stroke_counter = 0
+            previous_pen_down = state.pen_down
             continue
 
         if not stripped or stripped.startswith(COMMENT_PREFIXES):
@@ -132,26 +134,41 @@ def _process_job(job: JobParams, params: PostParams, state: _State, buffer: List
 
         cmd = stripped.split()[0].upper()
         z_value = _extract_axis(stripped, "Z")
+        
         if z_value is not None:
+            new_pen_down = z_value >= params.pen_down_z - FLOAT_EPS
+            
+            # 检测落笔→抬笔转换（笔画结束）
+            if previous_pen_down and not new_pen_down:
+                stroke_counter += 1
+                
+                # 先输出抬笔指令
+                buffer.append(raw_line)
+                
+                # 笔画结束后检查是否需要蘸墨
+                if job.ink_mode == "stroke" and job.stroke_interval:
+                    if stroke_counter > 0 and stroke_counter % job.stroke_interval == 0:
+                        ink_counter += 1
+                        _inject_macro(
+                            buffer,
+                            params.ink_macro,
+                            params,
+                            state,
+                            note=f"{job.name} 自动蘸墨 #{ink_counter}",
+                        )
+                        stroke_counter = 0
+                
+                # 更新状态并继续下一行
+                state.current_z = z_value
+                state.pen_down = new_pen_down
+                previous_pen_down = new_pen_down
+                continue
+            
             state.current_z = z_value
-            state.pen_down = z_value >= params.pen_down_z - FLOAT_EPS
-
-        if cmd.startswith(MOTION_PREFIXES) and _contains_xy(stripped) and state.pen_down:
-            move_counter += 1
+            state.pen_down = new_pen_down
+            previous_pen_down = new_pen_down
 
         buffer.append(raw_line)
-
-        if job.ink_mode == "stroke" and job.stroke_interval:
-            if move_counter and move_counter % job.stroke_interval == 0:
-                ink_counter += 1
-                _inject_macro(
-                    buffer,
-                    params.ink_macro,
-                    params,
-                    state,
-                    note=f"{job.name} 自动蘸墨 #{ink_counter}",
-                )
-                move_counter = 0
 
     buffer.append(f"; === {job.name} 结束 ===")
     buffer.append("")
@@ -270,13 +287,6 @@ def _inject_macro(
         logger.warning("%s: 配置的宏为空，跳过插入", note)
         return
 
-    if abs(state.current_z - params.pen_up_z) > FLOAT_EPS:
-        lift_cmd = f"G0 Z{params.pen_up_z}"
-        logger.debug("%s: 当前 Z=%.3f，先抬笔 -> %s", note, state.current_z, lift_cmd)
-        buffer.append(lift_cmd)
-        state.current_z = params.pen_up_z
-        state.pen_down = False
-
     buffer.append(f"; ---- {note} 开始 ----")
     for raw in macro_lines:
         line = _format_macro_line(raw, params.macro_context)
@@ -287,6 +297,7 @@ def _inject_macro(
             state.pen_down = z_value >= params.pen_down_z - FLOAT_EPS
     buffer.append(f"; ---- {note} 结束 ----")
 
+    # 宏执行完成后确保状态为抬笔
     if abs(state.current_z - params.pen_up_z) > FLOAT_EPS:
         buffer.append(f"G0 Z{params.pen_up_z}")
         state.current_z = params.pen_up_z
