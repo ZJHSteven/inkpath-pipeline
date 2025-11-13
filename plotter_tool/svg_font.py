@@ -184,11 +184,13 @@ def _position_for_char(
         col += 1  # 准备处理本行下一个字符
     else:  # vertical
         if row >= max_rows:
-            row = 0  # 纵排写满一列后从新一列顶端开始
-            col += 1  # x 方向右移一个单元宽度
-        x = col * char_step  # 列数直接映射到当前格子的左上角 x
-        y = row * line_step  # 行数直接映射到当前格子的左上角 y
-        row += 1  # 垂直排版下一个字符继续往下
+            row = 0  # ����д��һ�к����һ�ж��˿�ʼ
+            col += 1  # x ��������һ����Ԫ����
+        rightmost_col_index = max_cols - 1  # ���Ұ�дʱһ����Ҫ�ӵ�һ�������ұ߿�ʼ����λ���ٽ�Ĭ��ֵΪ 0
+        column_from_right = rightmost_col_index - col  # ��¼�Ǵ��ұߵڼ���д����ʹ����д˳���������д���ȵ��ұ�
+        x = column_from_right * char_step  # ����ǰ�кŵ�����ӳ�䵽��Ļ���ϵ x ����ʹ�������ұ���ȡֵ����
+        y = row * line_step  # ����ֱ��ӳ�䵽��ǰ���ӵ����Ͻ� y
+        row += 1  # ��ֱ�Ű���һ���ַ���������
     return x, y, col, row
 
 
