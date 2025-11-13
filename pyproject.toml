@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "inkpath-pipeline"
 version = "0.1.0"
@@ -9,3 +13,6 @@ dependencies = []
 [project.scripts]
 inkplot = "plotter_tool.cli:main"
 inkplot-gui = "plotter_tool.gui:launch"
+
+[tool.setuptools]
+packages = { find = { include = ["plotter_tool"] } }
