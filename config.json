@@ -41,7 +41,7 @@
     ]
   },
   "plotter": {
-    "pen_down_z": 8.0,
+    "pen_down_z": 7.0,
     "pen_up_z": 0.0,
     "safe_z": 1.0
   },
